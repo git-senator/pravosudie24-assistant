@@ -1,0 +1,5 @@
+# Скрипты для сервера всегда с переводами строк Linux, иначе bash на Ubuntu
+# спотыкается о невидимый символ возврата каретки из Windows.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
