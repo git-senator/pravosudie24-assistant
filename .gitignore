@@ -1,0 +1,16 @@
+# СЕКРЕТЫ — никогда не должны попасть в репозиторий
+.env
+*.session
+*.session-journal
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Прочее
+*.log
+.DS_Store
+Thumbs.db

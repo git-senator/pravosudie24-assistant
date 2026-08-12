@@ -1,0 +1,22 @@
+services:
+  assistant:
+    build: .
+    container_name: tg-assistant
+    restart: unless-stopped
+    env_file: .env
+
+    # Сессии Telegram и база живут снаружи контейнера,
+    # чтобы переживать пересборку
+    volumes:
+      - ./data:/app/data
+
+    # Жёсткие лимиты: больше этого контейнер взять не сможет,
+    # что бы внутри ни случилось
+    mem_limit: 512m
+    cpus: 0.5
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
