@@ -6,7 +6,7 @@ API не помнит прошлых разговоров: историю под
 """
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import настройки
@@ -23,6 +23,18 @@ from . import настройки
 
 def сейчас() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def давность(часов: float) -> str:
+    """
+    Метка времени «сколько-то часов назад» в том же виде, что и сейчас().
+
+    Сравнивать со встроенным datetime('now') нельзя: там между датой и
+    временем пробел, а у нас «T» и часовой пояс — строки сравниваются
+    посимвольно, и запись пятичасовой давности считалась свежей.
+    """
+    момент = datetime.now(timezone.utc) - timedelta(hours=часов)
+    return момент.isoformat(timespec="seconds")
 
 
 СХЕМА = """
@@ -202,9 +214,8 @@ class Картотека:
 
     def первых_за_период(self, часов: int) -> int:
         cur = self.db.execute(
-            """SELECT COUNT(*) AS с FROM отправки
-               WHERE первое = 1 AND время >= datetime('now', ?)""",
-            (f"-{часов} hours",),
+            "SELECT COUNT(*) AS с FROM отправки WHERE первое = 1 AND время >= ?",
+            (давность(часов),),
         )
         return cur.fetchone()["с"]
 
@@ -228,7 +239,31 @@ class Картотека:
 
     def потрачено_за_сутки(self) -> float:
         cur = self.db.execute(
-            """SELECT COALESCE(SUM(доллары), 0) AS с FROM расходы
-               WHERE время >= datetime('now', '-24 hours')"""
+            "SELECT COALESCE(SUM(доллары), 0) AS с FROM расходы WHERE время >= ?",
+            (давность(24),),
         )
         return float(cur.fetchone()["с"])
+
+    # --- долги -----------------------------------------------------------
+
+    def неотвеченные(self, не_старше_часов: int = 24) -> list[dict]:
+        """
+        Кому мы остались должны ответ: последнее слово в переписке — за
+        клиентом. Так бывает, когда модель была занята или программу
+        перезапустили посреди разговора. Без этого человек молчит вечно.
+        """
+        cur = self.db.execute(
+            """
+            SELECT к.telegram_id, п.время AS когда
+            FROM клиенты к
+            JOIN сообщения п ON п.id = (
+                SELECT MAX(id) FROM сообщения WHERE telegram_id = к.telegram_id
+            )
+            WHERE к.статус IN (?, ?, ?)
+              AND п.кто = 'клиент'
+              AND п.время >= ?
+            ORDER BY п.время
+            """,
+            (НОВЫЙ, В_ОЧЕРЕДИ, ВЕДЁТ_АССИСТЕНТ, давность(не_старше_часов)),
+        )
+        return [dict(с) for с in cur.fetchall()]

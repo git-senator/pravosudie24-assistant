@@ -104,8 +104,9 @@ async def команда_слушать() -> int:
 
 async def команда_ассистент() -> int:
     к = Картотека()
+    а = Ассистент(к)
     try:
-        await Ассистент(к).слушать()
+        await asyncio.gather(а.слушать(), а.догонять())
     finally:
         к.закрыть()
     return 0
@@ -152,6 +153,7 @@ async def команда_работать() -> int:
         asyncio.create_task(слушатель.слушать()),
         asyncio.create_task(ассистент.слушать()),
         asyncio.create_task(_очередь_фоном(ассистент, очередь)),
+        asyncio.create_task(ассистент.догонять()),
     ]
     try:
         await asyncio.gather(*задачи)

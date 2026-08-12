@@ -14,6 +14,7 @@
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,6 +23,12 @@ import httpx
 from . import настройки
 
 GEMINI_БАЗА = "https://generativelanguage.googleapis.com/v1beta/models"
+
+# У бесплатного тарифа Gemini есть предел запросов в минуту. Упереться в
+# него — обычное дело, а не поломка: надо просто подождать и повторить.
+ПОВТОРОВ = 4
+ПАУЗЫ = (5, 15, 40)  # секунд между попытками
+ПОВТОРЯЕМЫЕ_КОДЫ = {429, 500, 502, 503, 504}
 
 # Цены за миллион токенов: (вход, выход). Gemini на бесплатном тарифе — ноль.
 ЦЕНЫ = {
@@ -96,15 +103,48 @@ class ОшибкаМозга(RuntimeError):
 
 # --- Gemini --------------------------------------------------------------
 
+def _сколько_ждать(ответ: httpx.Response, по_умолчанию: float) -> float:
+    """Gemini часто сам подсказывает, через сколько повторять."""
+    try:
+        for деталь in ответ.json()["error"].get("details", []):
+            задержка = деталь.get("retryDelay")
+            if задержка:
+                return float(str(задержка).rstrip("s")) + 1
+    except Exception:
+        pass
+    return по_умолчанию
+
+
 def _gemini_запрос(модель: str, тело: dict) -> dict:
     ключ = настройки.GEMINI_КЛЮЧ
     if not ключ:
         raise ОшибкаМозга("GEMINI_API_KEY пуст")
     url = f"{GEMINI_БАЗА}/{модель}:generateContent?key={ключ}"
-    ответ = httpx.post(url, json=тело, timeout=120)
-    if ответ.status_code != 200:
-        raise ОшибкаМозга(f"Gemini вернул {ответ.status_code}: {ответ.text[:300]}")
-    return ответ.json()
+
+    беда = "неизвестно что"
+    for попытка in range(ПОВТОРОВ):
+        пауза = ПАУЗЫ[min(попытка, len(ПАУЗЫ) - 1)]
+        повторить = False
+
+        try:
+            ответ = httpx.post(url, json=тело, timeout=120)
+        except httpx.HTTPError as e:
+            беда, повторить = f"сеть: {e}", True
+        else:
+            if ответ.status_code == 200:
+                return ответ.json()
+            беда = f"{ответ.status_code}: {ответ.text[:300]}"
+            if ответ.status_code in ПОВТОРЯЕМЫЕ_КОДЫ:
+                повторить = True
+                пауза = _сколько_ждать(ответ, пауза)
+
+        if not повторить or попытка == ПОВТОРОВ - 1:
+            break
+
+        print(f"   (модель занята, жду {пауза:.0f} с и пробую снова)")
+        time.sleep(пауза)
+
+    raise ОшибкаМозга(f"Gemini не ответил после {ПОВТОРОВ} попыток — {беда}")
 
 
 def _gemini_разобрать(данные: dict, модель: str) -> Ответ:
