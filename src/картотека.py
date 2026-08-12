@@ -167,6 +167,30 @@ class Картотека:
         )
         self.db.commit()
 
+    def найти_по_нику(self, ник: str) -> dict[str, Any] | None:
+        ник = ник.strip().lstrip("@").lower()
+        cur = self.db.execute(
+            "SELECT * FROM клиенты WHERE lower(username) = ?", (ник,)
+        )
+        строка = cur.fetchone()
+        return dict(строка) if строка else None
+
+    def забыть(self, telegram_id: int) -> bool:
+        """
+        Убирает человека начисто: карточку, переписку, отправки.
+
+        Нужно, если человек просит удалить свои данные, и удобно для
+        повторных тестов — иначе слушатель считает его уже известным.
+        """
+        if not self.есть(telegram_id):
+            return False
+        for таблица in ("сообщения", "отправки", "карточки", "клиенты"):
+            self.db.execute(
+                f"DELETE FROM {таблица} WHERE telegram_id = ?", (telegram_id,)
+            )
+        self.db.commit()
+        return True
+
     def список(self, статус: str | None = None, сколько: int = 100) -> list[dict]:
         if статус:
             cur = self.db.execute(
