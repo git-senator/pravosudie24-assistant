@@ -19,6 +19,11 @@ from .картотека import (
 )
 from .уведомитель import Уведомитель
 
+
+class ОшибкаОтправки(RuntimeError):
+    """Не смогли написать человеку — обычно Асик его просто не знает."""
+
+
 # --- Инструменты ---------------------------------------------------------
 # Это всё, что ассистент умеет делать кроме как писать текст.
 
@@ -93,11 +98,36 @@ class Ассистент:
 
     # --- отправка --------------------------------------------------------
 
+    async def _адрес(self, telegram_id: int):
+        """
+        Кому слать. Асик мог никогда не видеть этого человека — тогда по
+        голому id Telegram его не найдёт. Сначала пробуем @username,
+        он ищется глобально; потом уже id.
+        """
+        клиент = self.картотека.получить(telegram_id) or {}
+        ник = клиент.get("username")
+
+        if ник:
+            try:
+                return await self.client.get_input_entity(ник)
+            except Exception:
+                pass
+
+        try:
+            return await self.client.get_input_entity(telegram_id)
+        except Exception as e:
+            raise ОшибкаОтправки(
+                f"Асик не знает этого человека (id={telegram_id}, "
+                f"username={ник or 'нет'}). Добавь @Asic_RF в ту же группу, "
+                f"где сидит Ридик — тогда он увидит участников. Причина: {e}"
+            ) from e
+
     async def отправить(self, telegram_id: int, текст: str, первое: bool = False) -> None:
         if настройки.РЕПЕТИЦИЯ:
             print(f"   [репетиция] НЕ отправлено {telegram_id}: {текст[:120]}")
         else:
-            сообщение = await self.client.send_message(telegram_id, текст)
+            куда = await self._адрес(telegram_id)
+            сообщение = await self.client.send_message(куда, текст)
             self.мои_сообщения.add(сообщение.id)
             print(f"   -> {telegram_id}: {текст[:120]}")
 
@@ -252,7 +282,16 @@ class Ассистент:
             print("   ! модель вернула пустоту")
             return
 
-        await self.отправить(telegram_id, текст, первое=True)
+        try:
+            await self.отправить(telegram_id, текст, первое=True)
+        except ОшибкаОтправки as e:
+            print(f"   ! {e}")
+            # Чтобы очередь не долбилась в него вечно
+            self.картотека.обновить(
+                telegram_id, статус=НА_ПАУЗЕ, причина_закрытия="не удалось написать"
+            )
+            return
+
         self.картотека.обновить(telegram_id, статус=ВЕДЁТ_АССИСТЕНТ)
 
     # --- запуск ----------------------------------------------------------
