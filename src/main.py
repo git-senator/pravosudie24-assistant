@@ -6,7 +6,8 @@
     python -m src.main скан       — пройти историю чатов и найти лидов
     python -m src.main лиды       — показать найденных
     python -m src.main сводка     — прислать итоги за сутки в почтовый ящик
-    python -m src.main забыть @ник — стереть человека из картотеки начисто
+    python -m src.main забыть @ник        — стереть человека из картотеки
+    python -m src.main забыть @ник совсем — и сам диалог в Telegram тоже
     python -m src.main слушать    — только слушатель, вживую
     python -m src.main ассистент  — только ассистент, отвечает на личку
     python -m src.main работать   — всё вместе: слушает, пишет первым, ведёт диалоги
@@ -212,32 +213,58 @@ def команда_лиды(сколько: int) -> int:
     return 0
 
 
-def команда_забыть(кого: str) -> int:
+async def команда_забыть(кого: str, и_чат: bool) -> int:
     """
     Стереть человека из картотеки: карточку, переписку, отправки.
 
     Нужно, если человек просит удалить свои данные, и удобно для повторных
     тестов — иначе слушатель считает его уже известным и молча пропускает.
+
+    Слово «совсем» вторым аргументом убирает ещё и сам диалог в Telegram,
+    у обеих сторон.
     """
     if not кого:
-        print("Кого забыть? Например: забыть @ivanov")
+        print("Кого забыть? Например: забыть @ivanov   (или: забыть @ivanov совсем)")
         return 1
 
     к = Картотека()
-    клиент = (
-        к.получить(int(кого)) if кого.isdigit() else к.найти_по_нику(кого)
-    )
+    клиент = к.получить(int(кого)) if кого.isdigit() else к.найти_по_нику(кого)
+
     if not клиент:
         print(f"В картотеке нет «{кого}»")
+        if not и_чат:
+            к.закрыть()
+            return 1
+        # В базе пусто, но диалог в Telegram мог остаться — убираем и его
+        а = Ассистент(к)
+        await а.client.start()
+        try:
+            await а.client.delete_dialog(кого, revoke=True)
+            print("Зато диалог в Telegram удалён, с обеих сторон.")
+            код = 0
+        except Exception as e:
+            print(f"Диалог удалить не вышло: {e}")
+            код = 1
+        await а.client.disconnect()
         к.закрыть()
-        return 1
+        return код
 
-    ник = f"@{клиент['username']}" if клиент["username"] else str(клиент["telegram_id"])
-    сообщений = к.сколько_сообщений(клиент["telegram_id"])
+    telegram_id = клиент["telegram_id"]
+    ник = f"@{клиент['username']}" if клиент["username"] else str(telegram_id)
     print(f"Стираю {ник} ({клиент['имя'] or '—'}), статус «{клиент['статус']}»")
-    print(f"  вместе с перепиской: {сообщений} сообщений")
+    print(f"  вместе с перепиской: {к.сколько_сообщений(telegram_id)} сообщений")
 
-    к.забыть(клиент["telegram_id"])
+    if и_чат:
+        а = Ассистент(к)
+        await а.client.start()
+        try:
+            await а.client.delete_dialog(telegram_id, revoke=True)
+            print("  диалог в Telegram удалён, с обеих сторон")
+        except Exception as e:
+            print(f"  ! диалог в Telegram удалить не вышло: {e}")
+        await а.client.disconnect()
+
+    к.забыть(telegram_id)
     print("Готово. Слушатель снова увидит его как нового.")
     к.закрыть()
     return 0
@@ -249,7 +276,12 @@ def команда_забыть(кого: str) -> int:
     "скан": lambda ч: asyncio.run(команда_скан(ч or 200)),
     "лиды": lambda ч: команда_лиды(ч or 50),
     "сводка": lambda ч: asyncio.run(команда_сводка()),
-    "забыть": lambda ч: команда_забыть(sys.argv[2] if len(sys.argv) > 2 else ""),
+    "забыть": lambda ч: asyncio.run(
+        команда_забыть(
+            sys.argv[2] if len(sys.argv) > 2 else "",
+            len(sys.argv) > 3 and sys.argv[3].lower() in ("совсем", "начисто"),
+        )
+    ),
     "слушать": lambda ч: asyncio.run(команда_слушать()),
     "ассистент": lambda ч: asyncio.run(команда_ассистент()),
     "работать": lambda ч: asyncio.run(команда_работать()),
