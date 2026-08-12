@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS расходы (
 );
 
 CREATE INDEX IF NOT EXISTS idx_расходы_время ON расходы(время);
+
+-- Какая карточка про какого клиента. Нужно, чтобы юрист мог ответить
+-- на карточку в почтовом ящике и тем самым забрать клиента себе.
+CREATE TABLE IF NOT EXISTS карточки (
+    сообщение_id INTEGER PRIMARY KEY,
+    telegram_id  INTEGER NOT NULL,
+    время        TEXT    NOT NULL
+);
 """
 
 
@@ -243,6 +251,23 @@ class Картотека:
             (давность(24),),
         )
         return float(cur.fetchone()["с"])
+
+    # --- карточки --------------------------------------------------------
+
+    def запомнить_карточку(self, сообщение_id: int, telegram_id: int) -> None:
+        self.db.execute(
+            """INSERT OR REPLACE INTO карточки (сообщение_id, telegram_id, время)
+               VALUES (?,?,?)""",
+            (сообщение_id, telegram_id, сейчас()),
+        )
+        self.db.commit()
+
+    def чья_карточка(self, сообщение_id: int) -> int | None:
+        cur = self.db.execute(
+            "SELECT telegram_id FROM карточки WHERE сообщение_id = ?", (сообщение_id,)
+        )
+        строка = cur.fetchone()
+        return строка["telegram_id"] if строка else None
 
     # --- отчётность ------------------------------------------------------
 

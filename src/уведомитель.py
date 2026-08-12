@@ -30,17 +30,22 @@ class Уведомитель:
             return настройки.ЯЩИК_USERNAME
         return настройки.ЯЩИК_ID
 
-    async def _послать(self, текст: str) -> None:
+    async def _послать(self, текст: str) -> int | None:
+        """Возвращает id отправленного сообщения — по нему узнаём ответ юриста."""
         if настройки.РЕПЕТИЦИЯ:
             print("\n[репетиция] карточка НЕ отправлена:\n" + текст)
-            return
+            return None
         try:
-            await self.client.send_message(await self._кому(), текст, link_preview=False)
+            сообщение = await self.client.send_message(
+                await self._кому(), текст, link_preview=False
+            )
             print("\n[карточка отправлена в почтовый ящик]")
+            return сообщение.id
         except Exception as e:
             print(f"\n! карточка не ушла: {e}\n{текст}")
+            return None
 
-    async def карточка(self, клиент: dict, данные: dict, срочно: bool = False) -> None:
+    async def карточка(self, клиент: dict, данные: dict, срочно: bool = False) -> int | None:
         шапка = "СРОЧНО — КЛИЕНТ ГОТОВ" if срочно else "КЛИЕНТ ГОТОВ"
         имя = клиент.get("имя") or "—"
         ник = f"@{клиент['username']}" if клиент.get("username") else "(без username)"
@@ -57,8 +62,9 @@ class Уведомитель:
         текст += строка("Готовность", данные.get("readiness"))
         текст += строка("Нашли в чате", клиент.get("чат_источник"))
         текст += f"\nОткрыть чат: {ссылка_на_чат(клиент)}"
+        текст += "\n\nОтветь на это сообщение — и я по нему замолчу."
 
-        await self._послать(текст)
+        return await self._послать(текст)
 
     async def вопрос(self, клиент: dict, вопрос: str) -> None:
         имя = клиент.get("имя") or "—"
