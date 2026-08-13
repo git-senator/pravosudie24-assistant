@@ -76,8 +76,31 @@ class Слушатель:
         self.тихо = тихо  # не печатать пропущенные
         акк = настройки.СЛУШАТЕЛЬ
         self.client = TelegramClient(акк.сессия, акк.api_id, акк.api_hash)
+
+        # Свои аккаунты. Ассистент и юрист тоже пишут в чатах, и без этого
+        # слушатель заводит на них карточки — бот начинает разговаривать
+        # сам с собой и жечь лимит модели.
+        self.свои_id: set[int] = set()
+        self.свои_ники: set[str] = set()
+        if настройки.ЯЩИК_ID:
+            self.свои_id.add(настройки.ЯЩИК_ID)
+        if настройки.ЯЩИК_USERNAME:
+            self.свои_ники.add(настройки.ЯЩИК_USERNAME.lower())
         self.статистика = {"просмотрено": 0, "по_словам": 0, "лидов": 0, "дублей": 0}
         self.сообщил_о_дубле: set[int] = set()
+
+    def свой(self, автор) -> bool:
+        """Наш ли это аккаунт — ассистент или почтовый ящик юриста."""
+        if getattr(автор, "id", None) in self.свои_id:
+            return True
+        ник = (getattr(автор, "username", None) or "").lower()
+        return bool(ник) and ник in self.свои_ники
+
+    def запомнить_своего(self, кто) -> None:
+        if getattr(кто, "id", None):
+            self.свои_id.add(кто.id)
+        if getattr(кто, "username", None):
+            self.свои_ники.add(кто.username.lower())
 
     # --- разбор одного сообщения ----------------------------------------
 
@@ -98,6 +121,8 @@ class Слушатель:
 
         автор = await сообщение.get_sender()
         if not isinstance(автор, User) or автор.bot or автор.is_self:
+            return None
+        if self.свой(автор):
             return None
 
         # свежесть
