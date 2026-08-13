@@ -109,6 +109,71 @@ async def _показать_ассистента(слушатель: Слуша�
         await client.disconnect()
 
 
+async def команда_разбор(сколько: int) -> int:
+    """
+    Показывает последние сообщения чатов и объясняет по каждому, почему
+    слушатель его взял или пропустил. Модель не вызывается — бесплатно.
+    """
+    from datetime import datetime, timezone
+
+    from telethon.tl.types import User
+
+    from .слушатель import описание_чата
+
+    к = Картотека()
+    с = Слушатель(к, тихо=True)
+    await с.client.start()
+    await _показать_ассистента(с)
+
+    print(f"Свои аккаунты: {с.свои_ники or '—'}")
+    print(f"Белый список чатов: {настройки.ТОЛЬКО_ЧАТЫ or 'все'}\n")
+
+    async for диалог in с.client.iter_dialogs():
+        if не_группа(диалог):
+            continue
+        имя = описание_чата(диалог.entity)
+        разрешён = настройки.чат_разрешён(имя)
+        print(f"=== {имя} — {'слушаем' if разрешён else 'НЕ в белом списке'}")
+        if not разрешён:
+            continue
+
+        async for сообщение in с.client.iter_messages(диалог.entity, limit=сколько):
+            текст = (сообщение.message or "").strip()
+            if not текст:
+                continue
+            автор = await сообщение.get_sender()
+            ник = getattr(автор, "username", None) or getattr(автор, "id", "?")
+            часов = (datetime.now(timezone.utc) - сообщение.date).total_seconds() / 3600
+
+            беды = []
+            if len(текст) < 12:
+                беды.append("короче 12 символов")
+            if not isinstance(автор, User):
+                беды.append("автор не человек")
+            elif автор.bot:
+                беды.append("бот")
+            elif автор.is_self:
+                беды.append("это сам слушатель")
+            elif с.свой(автор):
+                беды.append("это наш аккаунт")
+            if часов > настройки.СВЕЖЕСТЬ_ЧАСОВ:
+                беды.append(f"старше {настройки.СВЕЖЕСТЬ_ЧАСОВ} ч")
+            слова = с.фильтр.совпадения(текст)
+            if not слова:
+                беды.append("нет ключевых слов")
+            if isinstance(автор, User) and к.есть(автор.id):
+                беды.append("уже в картотеке")
+
+            print(f"  @{ник} ({часов:.1f} ч назад): {текст[:90]}")
+            if слова:
+                print(f"      слова: {', '.join(слова[:4])}")
+            print(f"      {'ДОШЛО БЫ ДО МОДЕЛИ' if not беды else 'отсев: ' + ', '.join(беды)}")
+
+    await с.client.disconnect()
+    к.закрыть()
+    return 0
+
+
 async def команда_скан(сколько: int) -> int:
     к = Картотека()
     с = Слушатель(к)
@@ -303,6 +368,7 @@ async def команда_забыть(кого: str, и_чат: bool) -> int:
     "проверка": lambda ч: команда_проверка(),
     "чаты": lambda ч: asyncio.run(команда_чаты()),
     "скан": lambda ч: asyncio.run(команда_скан(ч or 200)),
+    "разбор": lambda ч: asyncio.run(команда_разбор(ч or 10)),
     "лиды": lambda ч: команда_лиды(ч or 50),
     "сводка": lambda ч: asyncio.run(команда_сводка()),
     "забыть": lambda ч: asyncio.run(
