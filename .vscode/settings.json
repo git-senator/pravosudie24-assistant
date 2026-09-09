@@ -1,0 +1,4 @@
+{
+  // Не предлагать импорт .env в Postman: в файле ключи телеграм-аккаунтов и платных API.
+  "postman.settings.dotenv-detection-notification-visibility": false
+}
